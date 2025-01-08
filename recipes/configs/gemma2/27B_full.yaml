@@ -21,7 +21,7 @@ output_dir: /tmp/torchtune/gemma2_27B/full # /tmp may be deleted by your system.
 # Tokenizer
 tokenizer:
   _component_: torchtune.models.gemma.gemma_tokenizer
-  path: /tmp/gemma-2-27b/tokenizer.model
+  path: /scratch/project_462000353/transformers_cache/models--google--gemma-2-27b/snapshots/938270f5272feb02779b55c2bb2fffdd0f53ff0c
 
 # Dataset
 dataset:
@@ -36,12 +36,12 @@ model:
 
 checkpointer:
   _component_: torchtune.training.FullModelHFCheckpointer
-  checkpoint_dir: /tmp/gemma-2-27b/
+  checkpoint_dir: /scratch/project_462000353/transformers_cache/models--google--gemma-2-27b/snapshots/938270f5272feb02779b55c2bb2fffdd0f53ff0c
   checkpoint_files:
     filename_format: model-{}-of-{}.safetensors
     max_filename: "00024"
   recipe_checkpoint: null
-  output_dir: ${output_dir}
+  output_dir: /scratch/project_462000353/villekom/checkpoints/
   model_type: GEMMA2
 resume_from_checkpoint: False
 
@@ -63,40 +63,20 @@ optimizer_in_bwd: False  # True saves memory. Requires gradient_accumulation_ste
 device: cuda
 
 # Memory management
-enable_activation_checkpointing: True  # True reduces memory
-enable_activation_offloading: False  # True reduces memory
-
+enable_activation_checkpointing: False
+fsdp_cpu_offload: False
+fsdp_reshard_after_forward: False
 # Reduced precision
 dtype: bf16
 
 # Logging
 metric_logger:
-  _component_: torchtune.training.metric_logging.DiskLogger
-  log_dir: ${output_dir}/logs
+  _component_: torchtune.training.metric_logging.WandBLogger
+  project: torchtune_debug
+  log_dir: /scratch/project_462000353/villekom/logs/torchtune/gemma27B/
+output_dir: /tmp/alpaca-gemma2-27b-finetune
 log_every_n_steps: 1
 log_peak_memory_stats: True
 
-# Profiler (disabled)
-profiler:
-  _component_: torchtune.training.setup_torch_profiler
-  enabled: False
-
-  #Output directory of trace artifacts
-  output_dir: ${output_dir}/profiling_outputs
-
-  #`torch.profiler.ProfilerActivity` types to trace
-  cpu: True
-  cuda: True
-
-  #trace options passed to `torch.profiler.profile`
-  profile_memory: False
-  with_stack: False
-  record_shapes: True
-  with_flops: False
-
-  # `torch.profiler.schedule` options:
-  # wait_steps -> wait, warmup_steps -> warmup, active_steps -> active, num_cycles -> repeat
-  wait_steps: 5
-  warmup_steps: 3
-  active_steps: 2
-  num_cycles: 1
+#Distributed
+sharding_strategy: ShardingStrategy.
