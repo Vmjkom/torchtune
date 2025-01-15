@@ -22,10 +22,10 @@ export LOCAL_RANK=$SLURM_LOCALID
 export WORLD_SIZE=$SLURM_GPUS_ON_NODE
 export OMP_NUM_THREADS=1
 
-tune run \
+torchrun \
     --nproc-per-node=$SLURM_GPUS_ON_NODE \
     --standalone \
     --nnodes $SLURM_NNODES \
     --node_rank $SLURM_PROCID \
-    full_finetune_distributed \
-    --config ./recipes/configs/gemma2/27B_full.yaml
+    recipes/full_finetune_distributed.py \
+    --config recipes/configs/gemma2/27B_full.yaml
