@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J lingua_test_1NODE
+#SBATCH -J torchtune
 #SBATCH --cpus-per-task=7
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
