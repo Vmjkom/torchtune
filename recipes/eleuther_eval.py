@@ -19,7 +19,6 @@ from lm_eval.models.huggingface import HFLM
 from lm_eval.tasks import get_task_dict, TaskManager
 from lm_eval.utils import make_table
 from omegaconf import DictConfig
-
 from torchtune import config, training, utils
 from torchtune.data import (
     format_content_with_images,
@@ -32,14 +31,18 @@ from torchtune.modules import TransformerDecoder
 from torchtune.modules.common_utils import local_kv_cache
 from torchtune.modules.model_fusion import DeepFusionModel
 from torchtune.modules.transforms import Transform
-from torchtune.modules.transforms.tokenizers import ModelTokenizer
+
+from torchtune.modules.transforms.tokenizers import (
+    HuggingFaceModelTokenizer,
+    ModelTokenizer,
+)
 from torchtune.recipe_interfaces import EvalRecipeInterface
 from torchtune.training import FullModelTorchTuneCheckpointer
 
 
 class _VLMEvalWrapper(HFMultimodalLM):
     """An EvalWrapper for EleutherAI's eval harness based on gpt-fast's
-    EvalWrapper: https://github.com/pytorch-labs/gpt-fast/blob/main/eval.py.
+    EvalWrapper: https://github.com/meta-pytorch/gpt-fast/blob/main/eval.py.
 
     Note:
         This is ONLY for vision-language models.
@@ -280,7 +283,7 @@ class _VLMEvalWrapper(HFMultimodalLM):
 
 class _LLMEvalWrapper(HFLM):
     """An EvalWrapper for EleutherAI's eval harness based on gpt-fast's
-    EvalWrapper: https://github.com/pytorch-labs/gpt-fast/blob/main/eval.py.
+    EvalWrapper: https://github.com/meta-pytorch/gpt-fast/blob/main/eval.py.
 
     Note:
         This is for text-only decoder models.
@@ -315,6 +318,9 @@ class _LLMEvalWrapper(HFLM):
         self._batch_size = batch_size
         self._dtype = dtype
         self._enable_kv_cache = enable_kv_cache
+        # Set device explicitely here since HPU is not included in
+        # `device_list` in `HFLM` class
+        self._device = torch.device(device)
 
     @property
     def model(self):
@@ -349,7 +355,11 @@ class _LLMEvalWrapper(HFLM):
         # +1% on truthfulqa_mc2 with a LoRA finetune. lit-gpt also sets this to False,
         # see https://github.com/Lightning-AI/lit-gpt/blob/main/eval/lm_eval_harness.py#L66,
         # though notably fast-gpt does the opposite
-        # https://github.com/pytorch-labs/gpt-fast/blob/main/eval.py#L123.
+        # https://github.com/meta-pytorch/gpt-fast/blob/main/eval.py#L123.
+        if isinstance(self._tokenizer, HuggingFaceModelTokenizer):
+            return self._tokenizer.base_tokenizer.encode(
+                text=text, add_bos=False, add_eos=False
+            )
         return self._tokenizer.encode(text=text, add_bos=False, add_eos=False)
 
     def tok_batch_encode(
@@ -378,6 +388,18 @@ class _LLMEvalWrapper(HFLM):
 
     def _model_call(self, inps: torch.Tensor, **kwargs) -> torch.Tensor:
         return self._model(inps)
+
+    def apply_chat_template(
+        self, chat_history: list[dict[str, str]], add_generation_prompt: bool = True
+    ) -> str:
+        if hasattr(self._tokenizer, "prompt_template"):
+            return self._tokenizer.prompt_template(chat_history)
+        if isinstance(self.tokenizer, HuggingFaceModelTokenizer):
+            return self.tokenizer.render_template(chat_history)
+        raise ValueError(
+            "You can't use a tokenizer without a prompt template and apply_chat_template: True. "
+            "Use HuggingFaceModelTokenizer if you do not require a custom one."
+        )
 
     @torch.inference_mode()
     def _model_generate(
@@ -442,10 +464,10 @@ class EleutherEvalRecipe(EvalRecipeInterface):
         # Double check we have the right Eval Harness version
         from importlib.metadata import version
 
-        if version("lm-eval") < "0.4.5":
+        if version("lm-eval") < "0.4.5" or version("lm-eval") > "0.4.8":
             raise RuntimeError(
-                "This recipe requires EleutherAI Eval Harness v0.4.5 or higher. "
-                "Please install with `pip install lm-eval>=0.4.5`"
+                "This recipe requires EleutherAI Eval Harness between v0.4.5 - 0.4.8."
+                "Please install with `pip install lm-eval==0.4.8`"
             )
 
         # General variable initialization
@@ -462,6 +484,7 @@ class EleutherEvalRecipe(EvalRecipeInterface):
         self.batch_size = cfg.batch_size
         self.enable_kv_cache = cfg.get("enable_kv_cache", True)
         self.include_path = cfg.get("include_path", None)
+        self.apply_chat_template = cfg.get("chat_template", False)
 
     def setup(self, cfg: DictConfig) -> None:
         # Initialize quantizer and quantization mode
@@ -544,13 +567,14 @@ class EleutherEvalRecipe(EvalRecipeInterface):
         output = evaluate(
             self.eleuther_model_wrapper,
             task_dict,
+            apply_chat_template=self.apply_chat_template,
             limit=self.limit,
         )
         t1 = time.time() - t0
 
         # Log metrics
         self.logger.info(f"Eval completed in {t1:.02f} seconds.")
-        if self.device.type != "cpu":
+        if self.device.type != "cpu" and self.device.type != "mps":
             torch_device = utils.get_torch_device_namespace()
             self.logger.info(
                 f"Max memory allocated: {torch_device.max_memory_allocated() / 1e9:.02f} GB"

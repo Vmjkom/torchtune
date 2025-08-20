@@ -23,12 +23,20 @@ tokenizer:
   _component_: torchtune.models.gemma.gemma_tokenizer
   path: /scratch/project_462000353/transformers_cache/models--google--gemma-2-27b/snapshots/938270f5272feb02779b55c2bb2fffdd0f53ff0c
 
-# Dataset
+# Dataset and Sampler
 dataset:
-  _component_: torchtune.datasets.alpaca_dataset
+  _component_: torchtune.datasets.alpaca_cleaned_dataset
   packed: False  # True increases speed
+  split: train[:95%]
 seed: null
 shuffle: True
+
+# Validation
+run_val_every_n_steps: null  # Change to an integer to enable validation every N steps
+dataset_val:
+  _component_: torchtune.datasets.alpaca_cleaned_dataset
+  split: train[95%:]
+batch_size_val: ${batch_size}
 
 # Model Arguments
 model:
